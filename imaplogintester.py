@@ -29,6 +29,7 @@ import signal
 import sys
 import time
 import socks
+import socket
 import validators
 from termcolor import colored
 
@@ -132,7 +133,7 @@ def test_login(
         if socks5_proxy:
             (proxy_host, proxy_port) = split_host_port(socks5_proxy)
 
-            socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5, proxy_host, proxy_port)
+            socks.set_default_proxy(socks.PROXY_TYPE_SOCKS5, proxy_host, proxy_port)
             socks.socket.setdefaulttimeout(30)
             socks.wrapmodule(imaplib)
 
