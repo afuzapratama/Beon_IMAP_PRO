@@ -93,21 +93,25 @@ def result(email, password, success, output_file):
 
 def split_host_port(hostport):
     if hostport.find(":") == -1:
-        error('Error! SOCKS5_PROXY value must be in the "hostname:port" format.')
+        error('Error! SOCKS5_PROXY value must be in the "hostname:port:username:password" format.')
 
         sys.exit(1)
 
-    hostport = hostport.rsplit(":", 1)
+    parts = hostport.rsplit(":", 3)
+    if len(parts) != 4:
+        error('Error! SOCKS5_PROXY value must be in the "hostname:port:username:password" format.')
+        sys.exit(1)
 
-    host = hostport[0]
-    port = int(hostport[1])
+    host = parts[0]
+    port = int(parts[1])
+    username = parts[2]
+    password = parts[3]
 
     if host != "localhost" and not (validators.domain(host) or validators.ipv4(host)):
         error('SOCKS5 proxy host "{}" is not valid.'.format(host))
-
         sys.exit(1)
     else:
-        return (host, port)
+        return (host, port, username, password)
 
 
 def test_login(
@@ -131,11 +135,16 @@ def test_login(
 
     try:
         if socks5_proxy:
-            (proxy_host, proxy_port) = split_host_port(socks5_proxy)
+            (proxy_host, proxy_port, username, pwd) = split_host_port(socks5_proxy)
 
-            socks.set_default_proxy(socks.PROXY_TYPE_SOCKS5, proxy_host, proxy_port)
-            socks.socket.setdefaulttimeout(30)
-            socks.wrapmodule(imaplib)
+            socks.set_default_proxy(
+                socks.SOCKS5,
+                proxy_host,
+                proxy_port,
+                username=username,
+                password=pwd
+            )
+            socket.socket = socks.socksocket
 
         python_min_ver = sys.version_info[1]
 
@@ -205,7 +214,7 @@ def main():
     parser.add_argument(
         "-P",
         "--socks5-proxy",
-        help='use a SOCKS5 proxy (eg: "localhost:9050")',
+        help='use a SOCKS5 proxy (eg: "hostname:port:username:password")',
         required=False,
     )
     parser.add_argument(
