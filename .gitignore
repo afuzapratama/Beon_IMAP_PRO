@@ -1,2 +1,34 @@
-/backup/*
-backup/*
+# Backup & Test data
+backup/
+*.txt
+!requirements.txt
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+
+# Output files
+hasil_*.txt
+success.txt
+failed.txt
+out.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
