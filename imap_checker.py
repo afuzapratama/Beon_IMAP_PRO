@@ -18,11 +18,17 @@ import re
 import signal
 import sys
 import time
+import socket
 import socks
 import validators
+from datetime import datetime
 from termcolor import colored
 from ssl import SSLError
 from socket import timeout as socket_timeout
+
+# Store original socket for reset
+_original_socket = socket.socket
+_proxy_initialized = False
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -51,6 +57,25 @@ def cyan(text):
 
 def magenta(text):
     return colored(text, "magenta")
+
+
+def get_output_paths(base_dir="hasil"):
+    """Generate organized output paths with date and timestamp"""
+    now = datetime.now()
+    date_folder = now.strftime("%Y-%m-%d")
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    
+    # Create folder structure
+    success_dir = os.path.join(base_dir, date_folder, "success")
+    failed_dir = os.path.join(base_dir, date_folder, "failed")
+    
+    os.makedirs(success_dir, exist_ok=True)
+    os.makedirs(failed_dir, exist_ok=True)
+    
+    success_file = os.path.join(success_dir, f"success_{timestamp}.txt")
+    failed_file = os.path.join(failed_dir, f"failed_{timestamp}.txt")
+    
+    return success_file, failed_file
 
 
 def clear_screen():
@@ -106,17 +131,21 @@ def test_single_login(email, password, config, timeout=10, proxy_settings=None, 
     
     try:
         # Setup proxy if provided
+        global _proxy_initialized
         if proxy_settings and proxy_settings.get("host"):
-            socks.setdefaultproxy(
-                socks.PROXY_TYPE_SOCKS5,
-                proxy_settings["host"],
-                proxy_settings["port"],
-                True,
-                proxy_settings.get("username"),
-                proxy_settings.get("password")
-            )
-            socks.socket.setdefaulttimeout(30)
-            socks.wrapmodule(imaplib)
+            if not _proxy_initialized:
+                socks.setdefaultproxy(
+                    socks.PROXY_TYPE_SOCKS5,
+                    proxy_settings["host"],
+                    proxy_settings["port"],
+                    True,
+                    proxy_settings.get("username"),
+                    proxy_settings.get("password")
+                )
+                socket.socket = socks.socksocket
+                _proxy_initialized = True
+                if verbose:
+                    print(f"🔒 Proxy configured: {proxy_settings['host']}:{proxy_settings['port']}")
         
         # Connect to IMAP
         if use_ssl:
@@ -240,8 +269,9 @@ class InteractiveMode:
             "show_successes_only": False
         }
         self.input_file = None
-        self.output_file = "success.txt"
-        self.failed_file = "failed.txt"
+        self.output_file = None  # Will be auto-generated
+        self.failed_file = None  # Will be auto-generated
+        self.use_organized_output = True  # Use organized folder structure
     
     def run(self):
         if not self.config:
@@ -283,7 +313,8 @@ class InteractiveMode:
         # Show current status
         print(magenta("─" * 50))
         print(f" 📄 Input File  : {cyan(self.input_file or 'Not set')}")
-        print(f" 💾 Output File : {cyan(self.output_file)}")
+        output_display = "Auto (hasil/YYYY-MM-DD/...)" if self.use_organized_output else self.output_file
+        print(f" 💾 Output      : {cyan(output_display)}")
         print(f" 🔒 Proxy       : {cyan(self.proxy_settings['host'] + ':' + str(self.proxy_settings['port']) if self.proxy_settings['host'] else 'Not set')}")
         print(magenta("─" * 50))
         
@@ -319,18 +350,29 @@ class InteractiveMode:
     
     def set_output_files(self):
         print(yellow("\n=== SET OUTPUT FILES ==="))
-        print(f"Current success file: {self.output_file}")
-        print(f"Current failed file: {self.failed_file}")
+        print(f"\nCurrent mode: {'Auto-organized (hasil/YYYY-MM-DD/...)' if self.use_organized_output else 'Manual'}")
+        print(f"Success file: {self.output_file or 'Auto'}")
+        print(f"Failed file: {self.failed_file or 'Auto'}")
         
-        success = input(cyan("Success output file (Enter to keep): ")).strip()
-        if success:
-            self.output_file = success
+        print("\n[1] Use organized folders (hasil/YYYY-MM-DD/success/ & failed/)")
+        print("[2] Set custom file paths")
         
-        failed = input(cyan("Failed output file (Enter to keep): ")).strip()
-        if failed:
-            self.failed_file = failed
+        choice = input(cyan("\nChoice [1]: ")).strip()
         
-        print(green("✓ Output files updated!"))
+        if choice == "2":
+            self.use_organized_output = False
+            success = input(cyan("Success output file: ")).strip()
+            if success:
+                self.output_file = success
+            failed = input(cyan("Failed output file: ")).strip()
+            if failed:
+                self.failed_file = failed
+            print(green("✓ Custom output files set!"))
+        else:
+            self.use_organized_output = True
+            self.output_file = None
+            self.failed_file = None
+            print(green("✓ Using organized folder structure!"))
     
     def configure_proxy(self):
         print(yellow("\n=== CONFIGURE SOCKS5 PROXY ==="))
@@ -407,8 +449,16 @@ class InteractiveMode:
             print(red("❌ Please set input file first!"))
             return
         
+        # Generate output paths if using organized structure
+        if self.use_organized_output:
+            self.output_file, self.failed_file = get_output_paths()
+        
         print(yellow("\n=== STARTING CREDENTIAL CHECK ==="))
-        confirm = input(cyan("Continue? (y/n): ")).strip().lower()
+        print(f"📄 Input: {self.input_file}")
+        print(f"✅ Success output: {self.output_file}")
+        print(f"❌ Failed output: {self.failed_file}")
+        
+        confirm = input(cyan("\nContinue? (y/n): ")).strip().lower()
         if confirm != "y":
             return
         
@@ -471,8 +521,9 @@ Examples:
     
     parser.add_argument("--cli", action="store_true", help="Use command line mode")
     parser.add_argument("-i", "--input", help="Input file with email:password")
-    parser.add_argument("-o", "--output", help="Output file for successful logins")
-    parser.add_argument("-f", "--failed", help="Output file for failed logins")
+    parser.add_argument("-o", "--output", help="Output file for successful logins (auto if not set)")
+    parser.add_argument("-f", "--failed", help="Output file for failed logins (auto if not set)")
+    parser.add_argument("-O", "--output-dir", default="hasil", help="Base output directory (default: hasil)")
     parser.add_argument("-P", "--proxy", help="SOCKS5 proxy (host:port)")
     parser.add_argument("-U", "--proxy-user", help="Proxy username")
     parser.add_argument("-W", "--proxy-pass", help="Proxy password")
@@ -506,11 +557,20 @@ Examples:
         proxy_settings["username"] = args.proxy_user
         proxy_settings["password"] = args.proxy_pass
     
+    # Generate output paths if not specified
+    output_file = args.output
+    failed_file = args.failed
+    
+    if not output_file or not failed_file:
+        auto_success, auto_failed = get_output_paths(args.output_dir)
+        output_file = output_file or auto_success
+        failed_file = failed_file or auto_failed
+    
     print_banner()
     process_file(
         args.input,
-        args.output,
-        args.failed,
+        output_file,
+        failed_file,
         config,
         args.timeout,
         args.sleep,

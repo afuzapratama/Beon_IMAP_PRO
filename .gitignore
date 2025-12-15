@@ -14,6 +14,7 @@ __pycache__/
 *.egg
 
 # Output files
+hasil/
 hasil_*.txt
 success.txt
 failed.txt
